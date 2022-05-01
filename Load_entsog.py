@@ -1,4 +1,4 @@
-from requests import get
+from requests import get, RequestException
 from datetime import datetime, timedelta
 
 end_date = (datetime.today() + timedelta(days=1)).strftime('%Y-%m-%d')
@@ -23,15 +23,19 @@ link_hours_nominations = f'https://transparency.entsog.eu/api/v1/operationaldata
 
 def write_file(link, filename):
     # NOTE the stream=True parameter below
-    with get(link, stream=True) as r:
-        r.raise_for_status()
-        with open(filename, 'wb') as f:
-            for chunk in r.iter_content(chunk_size=8192):
-                # If you have chunk encoded response uncomment if
-                # and set chunk_size parameter to None.
-                # if chunk:
-                f.write(chunk)
-                print('|', end='')
+    try:
+        with get(link, stream=True) as r:
+            r.raise_for_status()
+            with open(filename + '.xlsx', 'wb') as f:
+                for chunk in r.iter_content(chunk_size=8192):
+                    # If you have chunk encoded response uncomment if
+                    # and set chunk_size parameter to None.
+                    # if chunk:
+                    f.write(chunk)
+                    print('|', end='')
+    except E as RequestException:
+        print(E)
+        input()
     print('')
     print(f'Файл {filename} сохранен')
 

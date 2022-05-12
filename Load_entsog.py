@@ -1,5 +1,6 @@
-from requests import get, RequestException
+from requests   import get, RequestException
 from datetime import datetime, timedelta
+from os import listdir, path, unlink
 
 end_date = (datetime.today() + timedelta(days=1)).strftime('%Y-%m-%d')
 start_date_days = (datetime.today() - timedelta(days=11)).strftime('%Y-%m-%d')
@@ -10,7 +11,7 @@ print(end_date, start_date_days, start_date_hours, start_date_nominations, sep='
 
 link_days = f'https://transparency.entsog.eu/api/v1/operationalData.xlsx?forceDownload=true&' \
             f'isTransportData=true&dataset=1&from={start_date_days}&to={end_date}&indicator=Nomination,Renomination,' \
-            f'Allocation,Physical%20Flow&periodType=day&timezone=CET&periodize=0&limit=-1'
+            f'Allocation,Physical%20Flow,GCV&periodType=day&timezone=CET&periodize=0&limit=-1'
 link_hours = f'https://transparency.entsog.eu/api/v1/operationaldata.xlsx?forceDownload=true&' \
              f'isTransportData=true&dataset=1&from={start_date_hours}&to={end_date}&indicator=Physical%20Flow&' \
              f'periodType=hour&timezone=CET&periodize=0&limit=-1'
@@ -19,6 +20,19 @@ link_hours_nominations = f'https://transparency.entsog.eu/api/v1/operationaldata
                          f'from={start_date_nominations}&' \
                          f'to={end_date}&indicator=Nomination,Renomination,Allocation&periodType=day&timezone=' \
                          f'&periodize=0&limit=-1&isTransportData=true&dataset=1'
+DAYS_FOLDER = './days/'
+HOURS_FOLDER = './hours/'
+NOMINATIONS_FOLDER = './nominations/'
+
+
+def delete_files_in_dir(folder_name):
+    for filename in listdir(folder_name):
+        file_path = path.join(folder_name, filename)
+        try:
+            if path.isfile(file_path) or path.islink(file_path):
+                unlink(file_path)
+        except OSError as e:
+            print('Failed to delete %s. Reason: %s' % (file_path, e))
 
 
 def write_file(link, filename):
@@ -33,19 +47,24 @@ def write_file(link, filename):
                     # if chunk:
                     f.write(chunk)
                     print('|', end='')
-    except E as RequestException:
+    except RequestException as E:
         print(E)
         input()
     print('')
     print(f'Файл {filename} сохранен')
 
 
+print('Удалим старые файлы')
+delete_files_in_dir(DAYS_FOLDER)
+delete_files_in_dir(HOURS_FOLDER)
+delete_files_in_dir(NOMINATIONS_FOLDER)
+
 print('Загружаем файл по дням')
-write_file(link_days, f'entsog_days{end_date}')
+write_file(link_days, DAYS_FOLDER + 'days')
 print('Загружаем файл по часам')
-write_file(link_hours, f'entsog_hours{end_date}')
+write_file(link_hours, HOURS_FOLDER + 'hours')
 print('Загружаем номинации по часам')
-write_file(link_hours_nominations, f'entsog_hours_nominations{end_date}')
+write_file(link_hours_nominations, NOMINATIONS_FOLDER + 'nominations')
 
 print('Загрузка завершена')
 input()

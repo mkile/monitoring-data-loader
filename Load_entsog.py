@@ -4,13 +4,13 @@ from os import listdir, path, unlink
 
 end_date = (datetime.today() + timedelta(days=1)).strftime('%Y-%m-%d')
 start_date_days = (datetime.today() - timedelta(days=11)).strftime('%Y-%m-%d')
-start_date_hours = (datetime.today() - timedelta(days=3)).strftime('%Y-%m-%d')
+start_date_hours = (datetime.today() - timedelta(days=2)).strftime('%Y-%m-%d')
 start_date_nominations = start_date_hours
 
 print(end_date, start_date_days, start_date_hours, start_date_nominations, sep='\n')
 
 link_days = f'https://transparency.entsog.eu/api/v1/operationalData.xlsx?forceDownload=true&' \
-            f'isTransportData=true&dataset=1&from={start_date_days}&to={end_date}&indicator=Nomination,Renomination,' \
+            f'isTransportData=true&dataset=1&from={start_date_days}&to={end_date}&indicator=Renomination,' \
             f'Allocation,Physical%20Flow,GCV&periodType=day&timezone=CET&periodize=0&limit=-1'
 link_hours = f'https://transparency.entsog.eu/api/v1/operationaldata.xlsx?forceDownload=true&' \
              f'isTransportData=true&dataset=1&from={start_date_hours}&to={end_date}&indicator=Physical%20Flow&' \

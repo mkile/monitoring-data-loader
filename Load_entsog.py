@@ -1,6 +1,7 @@
 from requests import get, RequestException
 from datetime import datetime, timedelta
 from os import listdir, path, unlink
+from sys import argv
 import json
 
 FOLDERS = ['./days/', './hours/', './nominations/']
@@ -12,11 +13,7 @@ BAD_LINKS_FILE = 'bad_links.txt'
 
 class EntsogLink:
     # Класс для формирования раздельного списка ссылок
-    LINK_TEMPLATE = 'https://transparency.entsog.eu/api/v1/operationaldata.xlsx?forceDownload=true&' \
-                    'isTransportData=true&dataset=1&from={}&to={}&indicator={}&' \
-                    'periodType={}{}&timezone=CET&periodize=0&limit=-1'
-
-    def __init__(self, end_date, load_depth, folder, points=None, indicators=None, periodtype='day'):
+    def __init__(self, end_date, load_depth, folder, points=None, indicators=None, periodtype='day', type='xlsx'):
         if points is None:
             points = []
         if indicators is None:
@@ -33,16 +30,20 @@ class EntsogLink:
         self.indicators = indicators
         self.periodtype = periodtype
         self.folder = folder
+        self.type = type
+        if type != 'xlsx':
+            self.delimiter = '&delimiter=semicolon'
+        else:
+            self.delimiter = ''
 
     def get_links(self):
         result = []
         for start_date, end_date in zip(self.start_dates, self.end_dates):
             for indicator in self.indicators:
-                result.append({'link': self.LINK_TEMPLATE.format(start_date,
-                                                                 end_date,
-                                                                 indicator,
-                                                                 self.periodtype,
-                                                                 self.points),
+                result.append({'link': f'https://transparency.entsog.eu/api/v1/operationaldata.{self.type}'
+                                       f'?forceDownload=true&isTransportData=true&dataset=1&from={start_date}'
+                                       f'&to={end_date}&indicator={indicator}&periodType={self.periodtype}{self.points}'
+                                       f'&timezone=CET&periodize=0&limit=-1{self.delimiter}',
                                'folder': self.folder})
         return result
 
@@ -69,9 +70,10 @@ def write_files(links, clear):
         print('Загрузка по ссылке:', line['link'])
         # NOTE the stream=True parameter below
         try:
+            file_type = 'xlsx' if '.xlsx' in line['link'].lower() else 'csv'
             with get(line['link'], stream=True) as r:
                 r.raise_for_status()
-                with open(f'{line["folder"]}{index + 1}.xlsx', 'wb') as f:
+                with open(f'{line["folder"]}{index + 1}.{file_type}', 'wb') as f:
                     for chunk in r.iter_content(chunk_size=8192):
                         # If you have chunk encoded response uncomment if
                         # and set chunk_size parameter to None.
@@ -79,7 +81,8 @@ def write_files(links, clear):
                         f.write(chunk)
                         print('|', end='')
                 print('')
-                print(f'Файл номер {index + 1} из {len(links)}, сохранен под именем {line["folder"] + str(index)}.xlsx')
+                print(f'Файл номер {index + 1} из {len(links)}, сохранен '
+                      f'под именем {line["folder"] + str(index)}.{file_type}')
         except RequestException as E:
             print(f'!!! Файл не загружен, возникла ошибка {E}. Ссылка сохранена.')
             bad_links.append(line)
@@ -98,14 +101,22 @@ else:
     bad_links = []
 
 if len(bad_links) == 0:
-    print('Загрузка суточных данных...')
-    links = EntsogLink(end_date=end_date, load_depth=2, indicators=INDICATORS, folder=FOLDERS[0]).get_links()
-    links += EntsogLink(end_date=end_date, load_depth=2, periodtype=PERIODTYPE, folder=FOLDERS[1]).get_links()
-    links += EntsogLink(end_date=end_date, 
-                        load_depth=2, 
-                        indicators=INDICATORS, 
-                        points=POINTS, 
-                        folder=FOLDERS[2]).get_links()
+    file_type = 'xlsx'
+    if len(argv) > 1:
+        if argv[1].lower() == 'c':
+            print('Загружаем файлы в формате CSV')
+            file_type = 'csv'
+    else:
+        print('Загружаем файлы в формате XLSX')
+    print('Загрузка данных...')
+    links = EntsogLink(end_date=end_date, load_depth=11, indicators=INDICATORS,
+                       folder=FOLDERS[0], type=file_type).get_links()
+    links += EntsogLink(end_date=end_date, load_depth=2, periodtype=PERIODTYPE,
+                        folder=FOLDERS[1], type=file_type).get_links()
+    links += EntsogLink(end_date=end_date, load_depth=2, indicators=INDICATORS,
+                        points=POINTS,
+                        folder=FOLDERS[2],
+                        type=file_type).get_links()
     clear = True
 else:
     print('Обнаружены недогруженные данные. Попытаемся их дозагрузить...')
@@ -126,4 +137,5 @@ else:
     print('Недозагруженных ссылок нет.')
     if path.isfile(BAD_LINKS_FILE) or path.islink(BAD_LINKS_FILE):
         unlink(BAD_LINKS_FILE)
+    print('')
 input()

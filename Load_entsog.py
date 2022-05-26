@@ -1,70 +1,129 @@
-from requests   import get, RequestException
+from requests import get, RequestException
 from datetime import datetime, timedelta
 from os import listdir, path, unlink
+import json
 
-end_date = (datetime.today() + timedelta(days=1)).strftime('%Y-%m-%d')
-start_date_days = (datetime.today() - timedelta(days=11)).strftime('%Y-%m-%d')
-start_date_hours = (datetime.today() - timedelta(days=2)).strftime('%Y-%m-%d')
-start_date_nominations = start_date_hours
-
-print(end_date, start_date_days, start_date_hours, start_date_nominations, sep='\n')
-
-link_days = f'https://transparency.entsog.eu/api/v1/operationalData.xlsx?forceDownload=true&' \
-            f'isTransportData=true&dataset=1&from={start_date_days}&to={end_date}&indicator=Renomination,' \
-            f'Allocation,Physical%20Flow,GCV&periodType=day&timezone=CET&periodize=0&limit=-1'
-link_hours = f'https://transparency.entsog.eu/api/v1/operationaldata.xlsx?forceDownload=true&' \
-             f'isTransportData=true&dataset=1&from={start_date_hours}&to={end_date}&indicator=Physical%20Flow&' \
-             f'periodType=hour&timezone=CET&periodize=0&limit=-1'
-link_hours_nominations = f'https://transparency.entsog.eu/api/v1/operationaldata.xlsx?forceDownload=true&' \
-                         f'pointDirection=de-tso-0001itp-00096exit,pl-tso-0001itp-00096entry&' \
-                         f'from={start_date_nominations}&' \
-                         f'to={end_date}&indicator=Nomination,Renomination,Allocation&periodType=day&timezone=' \
-                         f'&periodize=0&limit=-1&isTransportData=true&dataset=1'
-DAYS_FOLDER = './days/'
-HOURS_FOLDER = './hours/'
-NOMINATIONS_FOLDER = './nominations/'
+FOLDERS = ['./days/', './hours/', './nominations/']
+INDICATORS = ['Nomination', 'Physical%20Flow','GCV', 'Allocation', 'Renomination']
+PERIODTYPE = 'hour'
+POINTS = ['de-tso-0001itp-00096exit', 'pl-tso-0001itp-00096entry']
+BAD_LINKS_FILE = 'bad_links.txt'
 
 
-def delete_files_in_dir(folder_name):
-    for filename in listdir(folder_name):
-        file_path = path.join(folder_name, filename)
+class EntsogLink:
+    # Класс для формирования раздельного списка ссылок
+    LINK_TEMPLATE = 'https://transparency.entsog.eu/api/v1/operationaldata.xlsx?forceDownload=true&' \
+                    'isTransportData=true&dataset=1&from={}&to={}&indicator={}&' \
+                    'periodType={}{}&timezone=CET&periodize=0&limit=-1'
+
+    def __init__(self, end_date, load_depth, folder, points=None, indicators=None, periodtype='day'):
+        if points is None:
+            points = []
+        if indicators is None:
+            indicators = ['Physical Flow']
+        load_depth += 1
+        self.start_dates = [(end_date - timedelta(days=x+1)).strftime('%Y-%m-%d')
+                            for x in range(load_depth)]
+        self.end_dates = [(end_date - timedelta(days=x)).strftime('%Y-%m-%d')
+                            for x in range(load_depth)]
+        if len(points) > 0:
+            self.points = f'&pointDirection={",".join(points)}'
+        else:
+            self.points = ''
+        self.indicators = indicators
+        self.periodtype = periodtype
+        self.folder = folder
+
+    def get_links(self):
+        result = []
+        for start_date, end_date in zip(self.start_dates, self.end_dates):
+            for indicator in self.indicators:
+                result.append({'link': self.LINK_TEMPLATE.format(start_date,
+                                                                 end_date,
+                                                                 indicator,
+                                                                 self.periodtype,
+                                                                 self.points),
+                               'folder': self.folder})
+        return result
+
+
+def delete_files_in_dirs(folders):
+    #Очистка папок
+    for folder_name in folders:
+        print('Очищаем папку:', folder_name)
+        for filename in listdir(folder_name):
+            file_path = path.join(folder_name, filename)
+            try:
+                if path.isfile(file_path) or path.islink(file_path):
+                    unlink(file_path)
+            except OSError as e:
+                print(f'Удалить не удалось {file_path}. Причина: {e}')
+
+
+def write_files(links, clear):
+    # Загрузка файлов по ссылкам и сохранение их в папки
+    bad_links = []
+    if clear:
+        delete_files_in_dirs(list(set([x['folder'] for x in links])))
+    for index, line in enumerate(links):
+        print('Загрузка по ссылке:', line['link'])
+        # NOTE the stream=True parameter below
         try:
-            if path.isfile(file_path) or path.islink(file_path):
-                unlink(file_path)
+            with get(line['link'], stream=True) as r:
+                r.raise_for_status()
+                with open(f'{line["folder"]}{index + 1}.xlsx', 'wb') as f:
+                    for chunk in r.iter_content(chunk_size=8192):
+                        # If you have chunk encoded response uncomment if
+                        # and set chunk_size parameter to None.
+                        # if chunk:
+                        f.write(chunk)
+                        print('|', end='')
+                print('')
+                print(f'Файл номер {index + 1} из {len(links)}, сохранен под именем {line["folder"] + str(index)}.xlsx')
+        except RequestException as E:
+            print(f'!!! Файл не загружен, возникла ошибка {E}. Ссылка сохранена.')
+            bad_links.append(line)
+    return bad_links
+
+
+end_date = (datetime.today() + timedelta(days=1))
+
+if path.isfile(BAD_LINKS_FILE) or path.islink(BAD_LINKS_FILE):
+    with open(BAD_LINKS_FILE, 'r') as json_file:
+        try:
+            bad_links = json.load(json_file)
         except OSError as e:
-            print('Failed to delete %s. Reason: %s' % (file_path, e))
+            bad_links = ''
+else:
+    bad_links = []
 
-
-def write_file(link, filename):
-    # NOTE the stream=True parameter below
-    try:
-        with get(link, stream=True) as r:
-            r.raise_for_status()
-            with open(filename + '.xlsx', 'wb') as f:
-                for chunk in r.iter_content(chunk_size=8192):
-                    # If you have chunk encoded response uncomment if
-                    # and set chunk_size parameter to None.
-                    # if chunk:
-                    f.write(chunk)
-                    print('|', end='')
-    except RequestException as E:
-        print(E)
-        input()
-    print('')
-    print(f'Файл {filename} сохранен')
-
-
-print('Удалим старые файлы')
-delete_files_in_dir(DAYS_FOLDER)
-delete_files_in_dir(HOURS_FOLDER)
-delete_files_in_dir(NOMINATIONS_FOLDER)
-
-print('Загружаем файл по дням')
-write_file(link_days, DAYS_FOLDER + 'days')
-print('Загружаем файл по часам')
-write_file(link_hours, HOURS_FOLDER + 'hours')
-print('Загружаем номинации по часам')
-write_file(link_hours_nominations, NOMINATIONS_FOLDER + 'nominations')
+if len(bad_links) == 0:
+    print('Загрузка суточных данных...')
+    links = EntsogLink(end_date=end_date, load_depth=2, indicators=INDICATORS, folder=FOLDERS[0]).get_links()
+    links += EntsogLink(end_date=end_date, load_depth=2, periodtype=PERIODTYPE, folder=FOLDERS[1]).get_links()
+    links += EntsogLink(end_date=end_date, 
+                        load_depth=2, 
+                        indicators=INDICATORS, 
+                        points=POINTS, 
+                        folder=FOLDERS[2]).get_links()
+    clear = True
+else:
+    print('Обнаружены недогруженные данные. Попытаемся их дозагрузить...')
+    links = bad_links
+    clear = False
+bad_links = write_files(links, clear)
 
 print('Загрузка завершена')
+if len(bad_links) > 0:
+    try:
+        with open(BAD_LINKS_FILE, 'w') as json_file:
+            json.dump(bad_links, json_file)
+        print(f'В файл {BAD_LINKS_FILE} сохранено {len(bad_links)} незагруженных ссылок.')
+    except OSError as e:
+        print('Ошибка записи не загруженных ссылок в файл.')
+        print('Список не загруженных ссылок:', bad_links, sep='\n')
+else:
+    print('Недозагруженных ссылок нет.')
+    if path.isfile(BAD_LINKS_FILE) or path.islink(BAD_LINKS_FILE):
+        unlink(BAD_LINKS_FILE)
 input()

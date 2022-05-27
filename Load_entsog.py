@@ -5,7 +5,7 @@ from sys import argv
 import json
 
 FOLDERS = ['./days/', './hours/', './nominations/']
-INDICATORS = ['Nomination', 'Physical%20Flow','GCV', 'Allocation', 'Renomination']
+INDICATORS = ['Nomination', 'Physical%20Flow', 'GCV', 'Allocation', 'Renomination']
 PERIODTYPE = 'hour'
 POINTS = ['de-tso-0001itp-00096exit', 'pl-tso-0001itp-00096entry']
 BAD_LINKS_FILE = 'bad_links.txt'
@@ -38,13 +38,16 @@ class EntsogLink:
 
     def get_links(self):
         result = []
+        index = 0
         for start_date, end_date in zip(self.start_dates, self.end_dates):
             for indicator in self.indicators:
                 result.append({'link': f'https://transparency.entsog.eu/api/v1/operationaldata.{self.type}'
                                        f'?forceDownload=true&isTransportData=true&dataset=1&from={start_date}'
                                        f'&to={end_date}&indicator={indicator}&periodType={self.periodtype}{self.points}'
                                        f'&timezone=CET&periodize=0&limit=-1{self.delimiter}',
-                               'folder': self.folder})
+                               'folder': self.folder,
+                               'filename': str(index)})
+                index += 1
         return result
 
 
@@ -73,7 +76,7 @@ def write_files(links, clear):
             file_type = 'xlsx' if '.xlsx' in line['link'].lower() else 'csv'
             with get(line['link'], stream=True) as r:
                 r.raise_for_status()
-                with open(f'{line["folder"]}{index + 1}.{file_type}', 'wb') as f:
+                with open(f'{line["folder"]}{line["filename"]}.{file_type}', 'wb') as f:
                     for chunk in r.iter_content(chunk_size=8192):
                         # If you have chunk encoded response uncomment if
                         # and set chunk_size parameter to None.
@@ -82,15 +85,15 @@ def write_files(links, clear):
                         print('|', end='')
                 print('')
                 print(f'Файл номер {index + 1} из {len(links)}, сохранен '
-                      f'под именем {line["folder"] + str(index)}.{file_type}')
+                      f'под именем {line["folder"]}{line["filename"]}.{file_type}')
         except RequestException as E:
             print(f'!!! Файл не загружен, возникла ошибка {E}. Ссылка сохранена.')
             bad_links.append(line)
     return bad_links
 
-
+# Конечная дата - день + 1
 end_date = (datetime.today() + timedelta(days=1))
-
+# Проверим наличие файла с недозагруженными ссылками
 if path.isfile(BAD_LINKS_FILE) or path.islink(BAD_LINKS_FILE):
     with open(BAD_LINKS_FILE, 'r') as json_file:
         try:
@@ -99,7 +102,7 @@ if path.isfile(BAD_LINKS_FILE) or path.islink(BAD_LINKS_FILE):
             bad_links = ''
 else:
     bad_links = []
-
+# Если есть ссылки в файле, то грузим по ссылкам вместо обычного набора
 if len(bad_links) == 0:
     file_type = 'xlsx'
     if len(argv) > 1:
@@ -119,7 +122,7 @@ if len(bad_links) == 0:
                         type=file_type).get_links()
     clear = True
 else:
-    print('Обнаружены недогруженные данные. Попытаемся их дозагрузить...')
+    print('Обнаружены незагруженные данные. Попытаемся их дозагрузить...')
     links = bad_links
     clear = False
 bad_links = write_files(links, clear)
@@ -134,7 +137,7 @@ if len(bad_links) > 0:
         print('Ошибка записи не загруженных ссылок в файл.')
         print('Список не загруженных ссылок:', bad_links, sep='\n')
 else:
-    print('Недозагруженных ссылок нет.')
+    print('Незагруженных ссылок нет.')
     if path.isfile(BAD_LINKS_FILE) or path.islink(BAD_LINKS_FILE):
         unlink(BAD_LINKS_FILE)
     print('')

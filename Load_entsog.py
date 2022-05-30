@@ -160,5 +160,4 @@ def main():
 
 
 if __name__ == "__main__":
-    #main()
-    archive_data()
+    main()

@@ -110,7 +110,7 @@ def main():
         with open(BAD_LINKS_FILE, 'r') as json_file:
             try:
                 bad_links = json.load(json_file)
-            except OSError as e:
+            except (OSError, json.JSONDecodeError) as e:
                 bad_links = ''
     else:
         bad_links = []

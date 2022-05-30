@@ -1,6 +1,7 @@
 from requests import get, RequestException
 from datetime import datetime, timedelta
 from os import listdir, path, unlink
+from zipfile import ZipFile
 from sys import argv
 import json
 
@@ -91,54 +92,73 @@ def write_files(links, clear):
             bad_links.append(line)
     return bad_links
 
-# Конечная дата - день + 1
-end_date = (datetime.today() + timedelta(days=1))
-# Проверим наличие файла с недозагруженными ссылками
-if path.isfile(BAD_LINKS_FILE) or path.islink(BAD_LINKS_FILE):
-    with open(BAD_LINKS_FILE, 'r') as json_file:
-        try:
-            bad_links = json.load(json_file)
-        except OSError as e:
-            bad_links = ''
-else:
-    bad_links = []
-# Если есть ссылки в файле, то грузим по ссылкам вместо обычного набора
-if len(bad_links) == 0:
-    file_type = 'xlsx'
-    if len(argv) > 1:
-        if argv[1].lower() == 'c':
-            print('Загружаем файлы в формате CSV')
-            file_type = 'csv'
-    else:
-        print('Загружаем файлы в формате XLSX')
-    print('Загрузка данных...')
-    links = EntsogLink(end_date=end_date, load_depth=11, indicators=INDICATORS,
-                       folder=FOLDERS[0], type=file_type).get_links()
-    links += EntsogLink(end_date=end_date, load_depth=2, periodtype=PERIODTYPE,
-                        folder=FOLDERS[1], type=file_type).get_links()
-    links += EntsogLink(end_date=end_date, load_depth=2, indicators=INDICATORS,
-                        points=POINTS,
-                        folder=FOLDERS[2],
-                        type=file_type).get_links()
-    clear = True
-else:
-    print('Обнаружены незагруженные данные. Попытаемся их дозагрузить...')
-    links = bad_links
-    clear = False
-bad_links = write_files(links, clear)
 
-print('Загрузка завершена')
-if len(bad_links) > 0:
-    try:
-        with open(BAD_LINKS_FILE, 'w') as json_file:
-            json.dump(bad_links, json_file)
-        print(f'В файл {BAD_LINKS_FILE} сохранено {len(bad_links)} незагруженных ссылок.')
-    except OSError as e:
-        print('Ошибка записи не загруженных ссылок в файл.')
-        print('Список не загруженных ссылок:', bad_links, sep='\n')
-else:
-    print('Незагруженных ссылок нет.')
+def archive_data():
+    with ZipFile('data_archive.zip', 'w') as zipObj:
+        for folder_name in FOLDERS:
+            for filename in listdir(folder_name):
+                file_path = path.join(folder_name, filename)
+                zipObj.write(file_path, file_path)
+
+
+def main():
+    # Основная процедур загрузки данных
+    # Конечная дата - день + 1
+    end_date = (datetime.today() + timedelta(days=1))
+    # Проверим наличие файла с недозагруженными ссылками
     if path.isfile(BAD_LINKS_FILE) or path.islink(BAD_LINKS_FILE):
-        unlink(BAD_LINKS_FILE)
-    print('')
-input()
+        with open(BAD_LINKS_FILE, 'r') as json_file:
+            try:
+                bad_links = json.load(json_file)
+            except OSError as e:
+                bad_links = ''
+    else:
+        bad_links = []
+    # Если есть ссылки в файле, то грузим по ссылкам вместо обычного набора
+    if len(bad_links) == 0:
+        file_type = 'xlsx'
+        if len(argv) > 1:
+            if argv[1].lower() == 'c':
+                print('Загружаем файлы в формате CSV')
+                file_type = 'csv'
+        else:
+            print('Загружаем файлы в формате XLSX')
+        print('Загрузка данных...')
+        links = EntsogLink(end_date=end_date, load_depth=11, indicators=INDICATORS,
+                           folder=FOLDERS[0], type=file_type).get_links()
+        links += EntsogLink(end_date=end_date, load_depth=2, periodtype=PERIODTYPE,
+                            folder=FOLDERS[1], type=file_type).get_links()
+        links += EntsogLink(end_date=end_date, load_depth=2, indicators=INDICATORS,
+                            points=POINTS,
+                            folder=FOLDERS[2],
+                            type=file_type).get_links()
+        clear = True
+    else:
+        print('Обнаружены незагруженные данные. Попытаемся их дозагрузить...')
+        links = bad_links
+        clear = False
+    bad_links = write_files(links, clear)
+
+    print('Загрузка завершена')
+    if len(bad_links) > 0:
+        try:
+            with open(BAD_LINKS_FILE, 'w') as json_file:
+                json.dump(bad_links, json_file)
+            print(f'В файл {BAD_LINKS_FILE} сохранено {len(bad_links)} незагруженных ссылок.')
+        except OSError as e:
+            print('Ошибка записи не загруженных ссылок в файл.')
+            print('Список не загруженных ссылок:', bad_links, sep='\n')
+    else:
+        print('Незагруженных ссылок нет.')
+        if path.isfile(BAD_LINKS_FILE) or path.islink(BAD_LINKS_FILE):
+            unlink(BAD_LINKS_FILE)
+        print('Архивируем данные...')
+        archive_data()
+        print('Данные заархивированы.')
+        print('')
+    input()
+
+
+if __name__ == "__main__":
+    #main()
+    archive_data()

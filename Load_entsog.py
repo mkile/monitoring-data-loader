@@ -10,6 +10,8 @@ INDICATORS = ['Nomination', 'Physical%20Flow', 'GCV', 'Allocation', 'Renominatio
 PERIODTYPE = 'hour'
 POINTS = ['de-tso-0001itp-00096exit', 'pl-tso-0001itp-00096entry']
 BAD_LINKS_FILE = 'bad_links.txt'
+ARCHIVE_FILE = 'data_archive.zip'
+DIVIDER = '-----------------------'
 
 
 class EntsogLink:
@@ -20,10 +22,10 @@ class EntsogLink:
         if indicators is None:
             indicators = ['Physical Flow']
         load_depth += 1
-        self.start_dates = [(end_date - timedelta(days=x+1)).strftime('%Y-%m-%d')
+        self.start_dates = [(end_date - timedelta(days=x + 1)).strftime('%Y-%m-%d')
                             for x in range(load_depth)]
         self.end_dates = [(end_date - timedelta(days=x)).strftime('%Y-%m-%d')
-                            for x in range(load_depth)]
+                          for x in range(load_depth)]
         if len(points) > 0:
             self.points = f'&pointDirection={",".join(points)}'
         else:
@@ -52,15 +54,19 @@ class EntsogLink:
         return result
 
 
+def delete_file(file_path):
+    if path.isfile(file_path) or path.islink(file_path):
+        unlink(file_path)
+        
+
 def delete_files_in_dirs(folders):
-    #Очистка папок
+    # Очистка папок
     for folder_name in folders:
         print('Очищаем папку:', folder_name)
         for filename in listdir(folder_name):
             file_path = path.join(folder_name, filename)
             try:
-                if path.isfile(file_path) or path.islink(file_path):
-                    unlink(file_path)
+                delete_file(file_path)
             except OSError as e:
                 print(f'Удалить не удалось {file_path}. Причина: {e}')
 
@@ -94,7 +100,9 @@ def write_files(links, clear):
 
 
 def archive_data():
-    with ZipFile('data_archive.zip', 'w') as zipObj:
+    # Архивация собранных файлов
+    delete_file(ARCHIVE_FILE)
+    with ZipFile(ARCHIVE_FILE, 'w') as zipObj:
         for folder_name in FOLDERS:
             for filename in listdir(folder_name):
                 file_path = path.join(folder_name, filename)
@@ -102,8 +110,8 @@ def archive_data():
 
 
 def main():
-    # Основная процедур загрузки данных
-    # Конечная дата - день + 1
+    # Процедура загрузки данных
+    # Конечная дата = день + 1
     end_date = (datetime.today() + timedelta(days=1))
     # Проверим наличие файла с недозагруженными ссылками
     if path.isfile(BAD_LINKS_FILE) or path.islink(BAD_LINKS_FILE):
@@ -112,8 +120,12 @@ def main():
                 bad_links = json.load(json_file)
             except (OSError, json.JSONDecodeError) as e:
                 bad_links = ''
+                delete_file(BAD_LINKS_FILE)
+                print('Файл с незагруженными ссылками поврежден, загружаем с начала.')
     else:
         bad_links = []
+        print('Незагруженные ссылки отсутствуют.')
+    print(DIVIDER)
     # Если есть ссылки в файле, то грузим по ссылкам вместо обычного набора
     if len(bad_links) == 0:
         file_type = 'xlsx'
@@ -139,6 +151,7 @@ def main():
         clear = False
     bad_links = write_files(links, clear)
 
+    print(DIVIDER)
     print('Загрузка завершена')
     if len(bad_links) > 0:
         try:
@@ -150,8 +163,7 @@ def main():
             print('Список не загруженных ссылок:', bad_links, sep='\n')
     else:
         print('Незагруженных ссылок нет.')
-        if path.isfile(BAD_LINKS_FILE) or path.islink(BAD_LINKS_FILE):
-            unlink(BAD_LINKS_FILE)
+        delete_file(BAD_LINKS_FILE)
         print('Архивируем данные...')
         archive_data()
         print('Данные заархивированы.')

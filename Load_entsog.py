@@ -1,16 +1,24 @@
+import time
+
 from requests import get, RequestException
 from datetime import datetime, timedelta
-from os import listdir, path, unlink
+from os import listdir, path, unlink, makedirs
 from zipfile import ZipFile
 from sys import argv
-import json
+from json import loads
+import smtplib
+from email.mime.application import MIMEApplication
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+# from email.utils import COMMASPACE, formatdate
 
 FOLDERS = ['./days/', './hours/', './nominations/']
 INDICATORS = ['Nomination', 'Physical%20Flow', 'GCV', 'Allocation', 'Renomination']
 PERIODTYPE = 'hour'
 POINTS = ['de-tso-0001itp-00096exit', 'pl-tso-0001itp-00096entry']
-BAD_LINKS_FILE = 'bad_links.txt'
-ARCHIVE_FILE = 'data_archive.zip'
+ARCHIVE_FOLDER = ['./archives/']
+EMAIL_CREDS = 'email_creds.txt'
+MAX_ARCHIVE_SIZE = 7000000
 DIVIDER = '-----------------------'
 
 
@@ -101,75 +109,98 @@ def write_files(links, clear):
 
 def archive_data():
     # Архивация собранных файлов
-    delete_file(ARCHIVE_FILE)
-    with ZipFile(ARCHIVE_FILE, 'w') as zipObj:
-        for folder_name in FOLDERS:
-            for filename in listdir(folder_name):
-                file_path = path.join(folder_name, filename)
+    delete_files_in_dirs(ARCHIVE_FOLDER)
+    archive_number = 0
+    for folder_name in FOLDERS:
+        for filename in listdir(folder_name):
+            file_path = path.join(folder_name, filename)
+            with ZipFile(f'{ARCHIVE_FOLDER[0]}{archive_number}.zip', 'a') as zipObj:
                 zipObj.write(file_path, file_path)
+                if sum([zinfo.file_size for zinfo in zipObj.filelist]) >= MAX_ARCHIVE_SIZE:
+                    archive_number += 1
+
+
+def ensure_no_bad_links(bad_links):
+    # Дозагрузка недогруженных ссылок
+    print(f'Попытаемся дозагрузить {len(bad_links)} незагруженных ссылок')
+    attempts = 5
+    while len(bad_links) > 0 and attempts > 0:
+        print(f'Осталось {attempts} попыток')
+        bad_links = write_files(bad_links, False)
+        if len(bad_links) > 0:
+            time.sleep(30)
+            attempts -= 1
+    if attempts <= 0 and len(bad_links) > 0:
+        print(f'За 5 попыток загрузить данные не удалось, недозагружено {len(bad_links)} ссылок.')
+    else:
+        print('Недозагруженных ссылок не осталось.')
+    return
+
+
+def send_email():
+    # Отправка сформированных архивов
+    with open("email_creds.txt", 'r') as jsonfile:
+        email_creds = loads(jsonfile.read())
+    for f in listdir(ARCHIVE_FOLDER[0]):
+        msg = MIMEMultipart()
+        msg['From'] = f'{email_creds["name"]}@{email_creds["server"]}'
+        msg['To'] = {email_creds["to"]}
+        # msg['Date'] = formatdate(localtime=True)
+        msg['Subject'] = f"Данные ENTSOG за {datetime.today().strftime('%Y-%m-%d')}"
+        msg.attach(MIMEText(f"Отправляем архив с файлом {[path.basename(f)]}"))
+        with open(path.join(ARCHIVE_FOLDER[0], f), "rb") as fil:
+            part = MIMEApplication(
+                fil.read(),
+                Name=path.basename(f)
+            )
+        # After the file is closed
+        part['Content-Disposition'] = 'attachment; filename="%s"' % path.basename(f)
+        msg.attach(part)
+        smtp = smtplib.SMTP(f'smtp.{email_creds["server"]}', email_creds["port"])
+        smtp.login(email_creds['name'], email_creds['password'])
+        smtp.sendmail(msg['From'], msg['To'], msg.as_bytes())
+        smtp.close()
+
+
+def check_or_create_folders(folders):
+    for folder_name in folders:
+        makedirs(folder_name, exist_ok=True)
 
 
 def main():
     # Процедура загрузки данных
+    check_or_create_folders(FOLDERS + ARCHIVE_FOLDER)
     # Конечная дата = день + 1
     end_date = (datetime.today() + timedelta(days=1))
-    # Проверим наличие файла с недозагруженными ссылками
-    if path.isfile(BAD_LINKS_FILE) or path.islink(BAD_LINKS_FILE):
-        with open(BAD_LINKS_FILE, 'r') as json_file:
-            try:
-                bad_links = json.load(json_file)
-            except (OSError, json.JSONDecodeError) as e:
-                bad_links = ''
-                delete_file(BAD_LINKS_FILE)
-                print('Файл с незагруженными ссылками поврежден, загружаем с начала.')
-    else:
-        bad_links = []
-        print('Незагруженные ссылки отсутствуют.')
     print(DIVIDER)
     # Если есть ссылки в файле, то грузим по ссылкам вместо обычного набора
-    if len(bad_links) == 0:
-        file_type = 'xlsx'
-        if len(argv) > 1:
-            if argv[1].lower() == 'c':
-                print('Загружаем файлы в формате CSV')
-                file_type = 'csv'
-        else:
-            print('Загружаем файлы в формате XLSX')
-        print('Загрузка данных...')
-        links = EntsogLink(end_date=end_date, load_depth=11, indicators=INDICATORS,
-                           folder=FOLDERS[0], type=file_type).get_links()
-        links += EntsogLink(end_date=end_date, load_depth=2, periodtype=PERIODTYPE,
-                            folder=FOLDERS[1], type=file_type).get_links()
-        links += EntsogLink(end_date=end_date, load_depth=2, indicators=INDICATORS,
-                            points=POINTS,
-                            folder=FOLDERS[2],
-                            type=file_type).get_links()
-        clear = True
+    file_type = 'xlsx'
+    if len(argv) > 1:
+        if argv[1].lower() == 'c':
+            print('Загружаем файлы в формате CSV')
+            file_type = 'csv'
     else:
-        print('Обнаружены незагруженные данные. Попытаемся их дозагрузить...')
-        links = bad_links
-        clear = False
-    bad_links = write_files(links, clear)
-
+        print('Загружаем файлы в формате XLSX')
+    print('Загрузка данных...')
+    links = EntsogLink(end_date=end_date, load_depth=11, indicators=INDICATORS,
+                       folder=FOLDERS[0], type=file_type).get_links()
+    links += EntsogLink(end_date=end_date, load_depth=2, periodtype=PERIODTYPE,
+                        folder=FOLDERS[1], type=file_type).get_links()
+    links += EntsogLink(end_date=end_date, load_depth=2, indicators=INDICATORS,
+                        points=POINTS,
+                        folder=FOLDERS[2],
+                        type=file_type).get_links()
+    bad_links = write_files(links, True)
     print(DIVIDER)
+    ensure_no_bad_links(bad_links)
     print('Загрузка завершена')
-    if len(bad_links) > 0:
-        try:
-            with open(BAD_LINKS_FILE, 'w') as json_file:
-                json.dump(bad_links, json_file)
-            print(f'В файл {BAD_LINKS_FILE} сохранено {len(bad_links)} незагруженных ссылок.')
-        except OSError as e:
-            print('Ошибка записи не загруженных ссылок в файл.')
-            print('Список не загруженных ссылок:', bad_links, sep='\n')
-    else:
-        print('Незагруженных ссылок нет.')
-        delete_file(BAD_LINKS_FILE)
-        print('Архивируем данные...')
-        archive_data()
-        print('Данные заархивированы.')
-        print('')
-    input()
+    print('Архивируем данные...')
+    archive_data()
+    print('Данные заархивированы.')
+    send_email()
+    print('')
 
 
 if __name__ == "__main__":
-    main()
+    # main()
+    send_email()

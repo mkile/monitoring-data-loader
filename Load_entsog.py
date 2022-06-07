@@ -7,10 +7,11 @@ from zipfile import ZipFile
 from sys import argv
 from json import loads
 import smtplib
+from smtplib import SMTPHeloError, SMTPAuthenticationError, SMTPNotSupportedError, SMTPException
 from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-# from email.utils import COMMASPACE, formatdate
+
 
 FOLDERS = ['./days/', './hours/', './nominations/']
 INDICATORS = ['Nomination', 'Physical%20Flow', 'GCV', 'Allocation', 'Renomination']
@@ -141,10 +142,18 @@ def send_email():
     # Отправка сформированных архивов
     with open("email_creds.txt", 'r') as jsonfile:
         email_creds = loads(jsonfile.read())
+    smtp = smtplib.SMTP(f'smtp.{email_creds["server"]}', email_creds["port"])
+    smtp.starttls()
+    try:
+        smtp.login(f'{email_creds["name"]}@{email_creds["server"]}', email_creds['password'])
+    except (SMTPHeloError, SMTPAuthenticationError, SMTPNotSupportedError, SMTPException) as err:
+        print(f'При попытке подключиться к почтовому ящику возникла ошибка {err}')
+        print('Отправка файлов по почте прервана.')
+        return
     for f in listdir(ARCHIVE_FOLDER[0]):
         msg = MIMEMultipart()
         msg['From'] = f'{email_creds["name"]}@{email_creds["server"]}'
-        msg['To'] = {email_creds["to"]}
+        msg['To'] = email_creds["to"]
         # msg['Date'] = formatdate(localtime=True)
         msg['Subject'] = f"Данные ENTSOG за {datetime.today().strftime('%Y-%m-%d')}"
         msg.attach(MIMEText(f"Отправляем архив с файлом {[path.basename(f)]}"))
@@ -156,10 +165,10 @@ def send_email():
         # After the file is closed
         part['Content-Disposition'] = 'attachment; filename="%s"' % path.basename(f)
         msg.attach(part)
-        smtp = smtplib.SMTP(f'smtp.{email_creds["server"]}', email_creds["port"])
-        smtp.login(email_creds['name'], email_creds['password'])
         smtp.sendmail(msg['From'], msg['To'], msg.as_bytes())
-        smtp.close()
+        print(f'Файл {path.basename(f)} отправлен.')
+    smtp.close()
+    return
 
 
 def check_or_create_folders(folders):
@@ -202,5 +211,4 @@ def main():
 
 
 if __name__ == "__main__":
-    # main()
-    send_email()
+    main()

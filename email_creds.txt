@@ -1,0 +1,1 @@
+{"name": "name", "password": "pass", "server": "server.xx", "port": 25, "to": "address@server.xx"}

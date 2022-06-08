@@ -1,3 +1,5 @@
+# -*- coding: utf8 -*-
+
 from requests import get, RequestException
 from datetime import datetime, timedelta
 from os import listdir, path, unlink
